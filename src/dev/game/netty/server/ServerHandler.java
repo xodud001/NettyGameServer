@@ -14,6 +14,7 @@ import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import org.json.simple.JSONObject;
 
+@SuppressWarnings("unchecked")
 public class ServerHandler extends ChannelInboundHandlerAdapter {
 
     private static final ChannelGroup channelGroup = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
@@ -54,74 +55,104 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        System.out.println("Read");
         String message = null;
         message = (String)msg;
-        System.out.println("channelRead of [SERVER]" +  message);
         JSONObject json = JsonParser.createJson(message);
-        Channel incoming = ctx.channel();
 
-        //로그인
-        if(json.get("Header").equals("LOGIN")) { // 파싱 데이터의 "Header"가 "login"일 떄
+        String header = json.get("Header").toString();
+
+        if(header.equals("Auth")) {
+            authHandler(ctx, (JSONObject)json.get("body"));
+        }
+//        }else if(header.equals("InGame")){
+//            //inGameHandler(ctx, json.get("body"));
+//        }else if("Event"){
+//            //eventHandler(ctx, json.get("body"));
+//        }
+    }
+
+    private void authHandler(ChannelHandlerContext ctx, JSONObject body) {
+        String function = body.get("Function").toString();
+        JSONObject result = new JSONObject();
+        JSONObject resultBody = new JSONObject();
+        result.put("Header", "Auth");
+        resultBody.put("Function", function);
+
+        // LOGIN 1
+        if(function.equals("1")) { // 파싱 데이터의 "Header"가 "login"일 떄
             User user = new User(); // 유저 객체 생성
-            user.setId((String) json.get("id"));
-            user.setPw((String) json.get("pw"));
+            user.setId((String) body.get("id"));
+            user.setPw((String) body.get("pw"));
 
             if (db.userLogin(user)) {
-                incoming.writeAndFlush("SUCCESS"+"\n");
+                resultBody.put("result", "SUCCESS");
+                System.out.println("[SUCCESS] 로그인");
             } else {
-                incoming.writeAndFlush("FAIL"+"\n");
+                resultBody.put("result", "FAIL");
                 System.err.println("[FAIL] 로그인");
             }
         }
-        // 회원가입
-        else if(json.get("Header").equals("CREATE")) {
+        // SIGN UP 2
+        else if(function.equals("2")) {
             User user = new User();
-            user.setName((String)json.get("name"));
-            user.setBirth((String)json.get("birth"));
-            user.setPhone((String)json.get("phone"));
-            user.setId((String)json.get("id"));
-            user.setPw((String)json.get("pw"));
+            user.setName((String)body.get("name"));
+            user.setBirth((String)body.get("birth"));
+            user.setPhone((String)body.get("phone"));
+            user.setId((String)body.get("id"));
+            user.setPw((String)body.get("pw"));
 
             if (db.createUser(user)) {
-                incoming.writeAndFlush("SUCCESS"+"\n");
+                resultBody.put("result", "SUCCESS");
                 System.out.println("[SUCCESS] 회원가입");
             } else {
-                incoming.writeAndFlush("FAIL"+"\n");
+                resultBody.put("result", "FAIL");
                 System.err.println("[FAIL] 회원가입");
             }
         }
-        // id 찾기
-        else if(json.get("Header").equals("ID")) {
+        // ID FIND 3
+        else if(function.equals("3")) {
             User user = new User();
-            user.setName((String)json.get("name"));
-            user.setBirth((String)json.get("birth"));
+            user.setName((String)body.get("name"));
+            user.setBirth((String)body.get("birth"));
 
-            String result = db.findID(user);
-            if ( result != null) {
-                incoming.writeAndFlush(result+"\n");
-                System.out.println("[SUCCESS] ID 찾기 : " + result);
+            String id = db.findID(user);
+            if ( id != null) {
+                resultBody.put("result", id);
+                System.out.println("[SUCCESS] ID 찾기 : " + id);
             } else {
-                incoming.writeAndFlush("FAIL"+"\n");
+                resultBody.put("result", "FAIL");
                 System.err.println("[FAIL] ID 찾기");
             }
         }
-        // pw 찾기
-        else if(json.get("Header").equals("PW")) {
+        // PW FIND 4
+        else if(function.equals("4")) {
             User user = new User();
-            user.setId((String)json.get("id"));
-            user.setName((String)json.get("name"));
-            String result = db.findPW(user);
-            if (result != null) {
-                incoming.writeAndFlush(result+"\n");
-                System.out.println("[SUCCESS] PW 찾기 : " + result);
+            user.setId((String)body.get("id"));
+            user.setName((String)body.get("name"));
+            String pw = db.findPW(user);
+            if (pw != null) {
+                resultBody.put("result", pw);
+                System.out.println("[SUCCESS] PW 찾기 : " + pw);
             } else {
-                incoming.writeAndFlush("FAIL"+"\n");
+                resultBody.put("result", "FAIL");
                 System.err.println("[FAIL] PW 찾기");
             }
-        }
-        else {
-            incoming.writeAndFlush("[WRONG] 잘못된 데이터"+"\n");
+        }else{
+            resultBody.put("result", "FAIL");
             System.out.println("[WRONG] 잘못된 데이터");
         }
+        result.put("body", resultBody.toJSONString());
+        ctx.writeAndFlush(result + "\n");
     }
+
+
+//    private void inGameHandler(ChannelHandlerContext ctx, JSONObject body) {
+//
+//    }
+//
+//    private void eventHandler(ChannelHandlerContext ctx, JSONObject body) {
+//
+//    }
+
 }
