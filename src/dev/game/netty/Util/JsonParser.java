@@ -7,7 +7,13 @@ import org.json.simple.parser.ParseException;
 public class JsonParser {
     private static JSONParser jParser = new JSONParser();
 
-    public static JSONObject createJson(String data) throws ParseException {
-        return (JSONObject)jParser.parse(data);
+    public static JSONObject createJson(String data){
+        JSONObject result = new JSONObject();
+        try{
+            result = (JSONObject)jParser.parse(data);
+        }catch (ParseException e){
+            e.printStackTrace();
+        }
+        return result;
     }
 }

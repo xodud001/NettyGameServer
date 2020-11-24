@@ -1,11 +1,10 @@
 package dev.game.netty.server;
 
-import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
-
 import dev.game.netty.Util.JsonParser;
 import dev.game.netty.database.DatabaseConnection;
 import dev.game.netty.database.table.User;
+import dev.game.netty.repository.Crewmate;
+import dev.game.netty.repository.Room;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -13,6 +12,7 @@ import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import org.json.simple.JSONObject;
+import org.json.simple.parser.ParseException;
 
 @SuppressWarnings("unchecked")
 public class ServerHandler extends ChannelInboundHandlerAdapter {
@@ -24,10 +24,6 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
         System.out.println("handlerAdded of [SERVER]");
         Channel incoming = ctx.channel();
-        for (Channel channel : channelGroup) {
-            //사용자가 추가되었을 때 기존 사용자에게 알림
-            channel.write("[SERVER] - " + incoming.remoteAddress() + "has joined!\n");
-        }
         channelGroup.add(incoming);
     }
 
@@ -41,10 +37,6 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         System.out.println("handlerRemoved of [SERVER]");
         Channel incoming = ctx.channel();
-        for (Channel channel : channelGroup) {
-            //사용자가 나갔을 때 기존 사용자에게 알림
-            channel.write("[SERVER] - " + incoming.remoteAddress() + "has left!\n");
-        }
         channelGroup.remove(incoming);
     }
 
@@ -55,21 +47,101 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        System.out.println("Read");
+
         String message = null;
         message = (String)msg;
         JSONObject json = JsonParser.createJson(message);
 
+        if(json.get("Header") == null) {
+            errorHandler(ctx, message);
+            return;
+        }
+
         String header = json.get("Header").toString();
 
-        if(header.equals("Auth")) {
-            authHandler(ctx, (JSONObject)json.get("body"));
+        switch (header) {
+            case "InGame":
+                inGameHandler(ctx, (JSONObject) json.get("Body"));
+                break;
+            case "Auth":
+                authHandler(ctx, (JSONObject) json.get("Body"));
+                break;
+            case "Event":
+                eventHandler(ctx, (JSONObject) json.get("Body"));
+                break;
         }
-//        }else if(header.equals("InGame")){
-//            //inGameHandler(ctx, json.get("body"));
-//        }else if("Event"){
-//            //eventHandler(ctx, json.get("body"));
-//        }
+    }
+
+    private void errorHandler(ChannelHandlerContext ctx, String msg){
+
+    }
+
+    private void inGameHandler(ChannelHandlerContext ctx, JSONObject body){
+        String function = body.get("Function").toString();
+        JSONObject result = new JSONObject();
+        JSONObject resultBody = new JSONObject();
+        result.put("Header", "InGame");
+        resultBody.put("Function", function);
+
+        if(function.equals("6")) {
+            Room room = Room.getRoom( Integer.parseInt(body.get("code").toString()) );
+            if(room != null) {
+                room.update((JSONObject)body.get("crewmate"));
+                resultBody.put("code", room.getRoomCode());
+
+                JSONObject crewmatesJson = new JSONObject(); // 크루메이트들 담을 Json
+
+                for (Crewmate crewmate : room.getCrewmates()){ // 기존 방에 있던 크루원들 초기 정보
+                    crewmatesJson.put(room.getCrewmates().indexOf(crewmate), crewmate.getInitCrewmateJson()); // 크루메이트 담음
+                }
+                crewmatesJson.put("crewmates_size", room.getCrewmates().size()); // 방인원 현재 사이즈
+                resultBody.put("crewmates", crewmatesJson); // 크루메이트들 정보
+            }
+        }
+        result.put("Body", resultBody);
+        ctx.writeAndFlush(result + "\n");
+    }
+
+    private void eventHandler(ChannelHandlerContext ctx, JSONObject body) throws ParseException {
+        String function = body.get("Function").toString();
+        JSONObject result = new JSONObject();
+        JSONObject resultBody = new JSONObject();
+        result.put("Header", "Event");
+        resultBody.put("Function", function);
+
+        if(function.equals("5")) {
+            Room room = Room.getRoom(); // 방 받아옴
+            resultBody.put("code", room.getRoomCode());
+
+            room.enter(ctx, JsonParser.createJson(body.get("crewmate").toString()));
+
+            JSONObject crewmatesJson = new JSONObject();
+            for (Crewmate crewmate : room.getCrewmates()){ // 기존 방에 있던 크루원들 초기 정보
+                crewmatesJson.put(room.getCrewmates().indexOf(crewmate), crewmate.getInitCrewmateJson()); // 제이슨으로 받아서 0, 1, 2, 3, 4로 번호 매겨서 제이슨 생성
+            }
+            resultBody.put("crewmates", crewmatesJson);
+
+            result.put("Body", resultBody);
+            ctx.writeAndFlush(result + "\n");
+
+        }else if(function.equals("9")) {
+            int code = Integer.parseInt(body.get("code").toString());
+            String owner = body.get("owner").toString();
+            Room room = Room.getRoom(code); // 방 받아옴
+
+            if(room != null) {
+                room.getCrewmates().removeIf(crewmate -> crewmate.getOwner().equals(owner));
+                resultBody.put("owner", owner);
+                result.put("Body", resultBody);
+                room.getChannels().remove(ctx.channel());
+                for(Channel channel : room.getChannels()){
+                    System.out.println("EXIT : " + result);
+                    channel.writeAndFlush(result + "\n");
+
+                }
+            }
+        }
+
     }
 
     private void authHandler(ChannelHandlerContext ctx, JSONObject body) {
@@ -80,7 +152,7 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
         resultBody.put("Function", function);
 
         // LOGIN 1
-        if(function.equals("1")) { // 파싱 데이터의 "Header"가 "login"일 떄
+        if(function.equals("1")) {
             User user = new User(); // 유저 객체 생성
             user.setId((String) body.get("id"));
             user.setPw((String) body.get("pw"));
@@ -142,17 +214,7 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
             resultBody.put("result", "FAIL");
             System.out.println("[WRONG] 잘못된 데이터");
         }
-        result.put("body", resultBody.toJSONString());
+        result.put("Body", resultBody.toJSONString());
         ctx.writeAndFlush(result + "\n");
     }
-
-
-//    private void inGameHandler(ChannelHandlerContext ctx, JSONObject body) {
-//
-//    }
-//
-//    private void eventHandler(ChannelHandlerContext ctx, JSONObject body) {
-//
-//    }
-
 }

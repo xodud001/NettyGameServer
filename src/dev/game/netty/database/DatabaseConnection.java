@@ -37,9 +37,9 @@ public class DatabaseConnection {
             pstate.setString(1, user.getId());
             ResultSet rs = pstate.executeQuery();
 
-            rs.next();
-            result = rs.getString(1).equals(user.getId());
-
+            while(rs.next()) {
+                result = rs.getString("id").equals(user.getId());
+            }
         } catch (SQLException e) {
             e.printStackTrace();
         } finally {
